@@ -17,6 +17,7 @@
 
 При создании пользователя и базы данных PostgreSQL может возникнуть ошибка "Permission denied". Эта связана с тем, что PostgreSQL пытается изменить текущую директорию на /root, к которой у пользователя postgres нет доступа.
 Один из возможных решений может быть проверить права доступа пользователя:
+
     ls -ld /var/lib/postgresql
     sudo chown postgres:postgres /var/lib/postgresql
     sudo chmod 700 /var/lib/postgresql
