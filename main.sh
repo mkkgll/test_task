@@ -32,6 +32,9 @@ fi
 
 echo "Server $BEST_SERVER selected"
 
+read -s -p "Enter PostgreSQL password for user $USERNAME: " PGPASSWORD
+echo
+
 ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@"$BEST_SERVER" << EOF
 #!/bin/bash
 set -e
@@ -40,27 +43,53 @@ echo "Installation on $BEST_SERVER"
 
 if which apt; then
   echo "Debian-based system"
-  apt update && apt install -y postgresql
-else
-  echo "CentOS-based system"
-  yum install -y postgresql-server postgresql
-  postgresql-setup initdb
-  systemctl enable postgresql
-  systemctl start postgresql
-fi
+  apt update && apt install -y postgresql-15
+  APT_STATUS=\$?
+  if [ "\$APT_STATUS" -ne "0" ]; then
+    echo "Error: install failed with status \$APT_STATUS"
+    exit 1
+  fi
+  PG_HBA_CONF="/etc/postgresql/15/main/pg_hba.conf"
+  PG_CONF="/etc/postgresql/15/main/postgresql.conf"
 
-echo "host all all 0.0.0.0/0 md5" >> /var/lib/pgsql/data/pg_hba.conf
-echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/15/main/pg_hba.conf
-sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf /etc/postgresql/15/main/postgresql.conf
-sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/15/main/postgresql.conf
-systemctl restart postgresql
+elif which yum; then
+  echo "CentOS-based system"
+  yum install -y postgresql15-server postgresql15
+   YUM_STATUS=\$?
+  if [ "\$YUM_STATUS" -ne "0" ]; then
+    echo "Error: install failed with status \$YUM_STATUS"
+    exit 1
+  fi
+  postgresql-setup --version 15 initdb
+  systemctl enable postgresql-15
+  systemctl start postgresql-15
+  PG_HBA_CONF="/var/lib/pgsql/15/data/pg_hba.conf"
+  PG_CONF="/var/lib/pgsql/15/data/postgresql.conf"
+
+echo "host all all 0.0.0.0/0 md5" >> "\$PG_HBA_CONF"
+sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" "\$PG_CONF"
+systemctl restart postgresql@15-main.service
 
 second_server_ip=\$(echo "$SERVER_IPS" | awk '{print \$2}')
-sudo -u postgres psql -c "CREATE USER $USERNAME WITH PASSWORD 'qwerty';"
-sudo -u postgres psql -c "CREATE DATABASE $USERNAME OWNER $USERNAME;"
-echo "host $USERNAME $USERNAME $second_server_ip/32 md5" >> /var/lib/pgsql/data/pg_hba.conf
-echo "host $USERNAME $USERNAME $second_server_ip/32 md5" >> /etc/postgresql/15/main/pg_hba.conf
-systemctl restart postgresql
+
+sudo -u postgres -H psql -U postgres -c "CREATE USER $USERNAME WITH PASSWORD '$PGPASSWORD';"
+CREATE_USER_STATUS=\$?
+if [ "\$CREATE_USER_STATUS" -ne "0" ]; then
+  echo "Error: CREATE USER failed with status \$CREATE_USER_STATUS"
+  exit 1
+fi
+
+sudo -u postgres -H psql -U postgres -c "CREATE DATABASE $USERNAME OWNER $USERNAME;"
+CREATE_DB_STATUS=\$?
+if [ "\$CREATE_DB_STATUS" -ne "0" ]; then
+  echo "Error: CREATE DATABASE failed with status \$CREATE_DB_STATUS)"
+  exit 1
+fi
+
+if [ -n "$second_server_ip" ]; then
+  echo "host $USERNAME $USERNAME $second_server_ip/32 md5" >> "\$PG_HBA_CONF"
+fi
+systemctl restart postgresql@15-main.service
 
 echo "Installation complete"
 exit
